@@ -597,15 +597,26 @@ def training(dataset, opt, pipe, gcams, guidance_opt, debug_from, save_video):
 
         pos_weight = 100000000
         lap_weight = 100000000
-        neutrality_weight = 1000  # 中性表情损失权重
+        neutrality_weight = 100   # 适中权重，介于ISM Loss和几何损失之间
   
 
         laploss = masked_lap(gaussians._xyz[gaussians.mask].unsqueeze(0), initt_txyz.unsqueeze(0))
 
         xyzloss = torch.nanmean((gaussians._xyz[gaussians.mask] - initt_txyz)**2)
         
-        # 计算中性表情损失
-        neutrality_loss = compute_neutrality_loss(images)
+        # 计算中性表情损失 - 使用与test_six_views相同的正面角度
+        neutrality_loss = torch.tensor(0.0).to(images.device)
+        if iteration % 10 == 0:  # 每10次迭代计算一次
+            # 使用与GenerateCircleCameras相同的正面参数
+            frontal_cam = sample_camera(
+                fov=opt.default_fovy,  # 使用默认视野
+                theta=opt.default_polar,  # 使用默认仰角
+                phi=0.0  # 正面方位角
+            )
+            if frontal_cam is not None:
+                frontal_render = render(frontal_cam, gaussians, pipe, background, test=True)
+                frontal_image = frontal_render["render"].unsqueeze(0)
+                neutrality_loss = compute_neutrality_loss(frontal_image)
     
 
         if iteration % 100 == 0:
