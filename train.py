@@ -35,12 +35,80 @@ import torch.nn.functional as F
 import logging
 from utils.general_utils import inverse_sigmoid
 import glob
+from deepface import DeepFace
+import cv2
 
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
 except ImportError:
     TENSORBOARD_FOUND = False
+
+
+
+def compute_neutrality_loss(images, target_emotion='neutral'):
+    """
+    计算中性正则化损失
+    
+    Args:
+        images: 渲染的图像张量 (B, C, H, W)
+        target_emotion: 目标表情类别，默认为'neutral'
+    
+    Returns:
+        neutrality_loss: 中性正则化损失
+    """
+    try:
+        # DeepFace支持的表情类别
+        emotion_labels = ['angry', 'disgust', 'fear', 'happy', 'sad', 'surprise', 'neutral']
+        target_idx = emotion_labels.index(target_emotion)
+        
+        # 创建目标分布：中性表情概率为1，其他为0
+        target_dist = torch.zeros(len(emotion_labels)).to(images.device)
+        target_dist[target_idx] = 1.0
+        
+        batch_losses = []
+        
+        for i in range(images.shape[0]):
+            # 将张量转换为PIL图像格式
+            img_tensor = images[i].detach().cpu()
+            img_tensor = torch.clamp(img_tensor, 0, 1)  # 确保值在[0,1]范围
+            img_np = (img_tensor.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+            
+            # 转换为BGR格式（OpenCV格式）
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+            
+            try:
+                # 使用DeepFace进行表情分析
+                result = DeepFace.analyze(img_bgr, actions=['emotion'], enforce_detection=False)
+                
+                if isinstance(result, list):
+                    result = result[0]
+                    
+                # 获取表情概率分布
+                emotion_probs = []
+                for emotion in emotion_labels:
+                    emotion_probs.append(result['emotion'][emotion] / 100.0)  # DeepFace返回百分比
+                
+                pred_dist = torch.tensor(emotion_probs).to(images.device)
+                
+                # 计算交叉熵损失
+                pred_dist = torch.clamp(pred_dist, 1e-7, 1.0)  # 避免log(0)
+                ce_loss = -torch.sum(target_dist * torch.log(pred_dist))
+                batch_losses.append(ce_loss)
+                
+            except Exception as e:
+                # 如果单个图像分析失败，使用一个中等大小的损失值
+                print(f"Warning: DeepFace analysis failed for image {i}: {e}")
+                batch_losses.append(torch.tensor(2.0).to(images.device))
+        
+        if batch_losses:
+            return torch.stack(batch_losses).mean()
+        else:
+            return torch.tensor(0.0).to(images.device)
+            
+    except Exception as e:
+        print(f"Error in neutrality loss computation: {e}")
+        return torch.tensor(0.0).to(images.device)
 
 
 
@@ -529,16 +597,20 @@ def training(dataset, opt, pipe, gcams, guidance_opt, debug_from, save_video):
 
         pos_weight = 100000000
         lap_weight = 100000000
+        neutrality_weight = 1000  # 中性表情损失权重
   
 
         laploss = masked_lap(gaussians._xyz[gaussians.mask].unsqueeze(0), initt_txyz.unsqueeze(0))
 
         xyzloss = torch.nanmean((gaussians._xyz[gaussians.mask] - initt_txyz)**2)
+        
+        # 计算中性表情损失
+        neutrality_loss = compute_neutrality_loss(images)
     
 
         if iteration % 100 == 0:
-            print(f"[TRAIN] ISM Loss: {loss.item()} -- Positional Loss: {(xyzloss).item() * pos_weight} -- Laplacian Loss: {(laploss).item() * lap_weight}")
-        loss = ism_loss + xyzloss * pos_weight + laploss * lap_weight
+            print(f"[TRAIN] ISM Loss: {loss.item()} -- Positional Loss: {(xyzloss).item() * pos_weight} -- Laplacian Loss: {(laploss).item() * lap_weight} -- Neutrality Loss: {(neutrality_loss).item() * neutrality_weight}")
+        loss = ism_loss + xyzloss * pos_weight + laploss * lap_weight + neutrality_loss * neutrality_weight
 
         loss.backward()
 
