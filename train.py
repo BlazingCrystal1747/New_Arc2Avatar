@@ -455,6 +455,10 @@ def training(dataset, opt, pipe, gcams, guidance_opt, debug_from, save_video):
     process_view_points_copy = scene.getCircleVideoCameras(batch_size=opt.pro_frames_num,render45=opt.pro_render_45).copy()  
     frontal_viewpoint = process_view_points_copy.pop(0)
     
+    def sample_frontal_camera():
+        # 直接使用已经生成的正面相机
+        return frontal_viewpoint
+    
     embeddings = prepare_embeddings(guidance_opt, guidance, id_emb, pipe, factor=0.9) 
 
     first_iter = 1
@@ -607,16 +611,22 @@ def training(dataset, opt, pipe, gcams, guidance_opt, debug_from, save_video):
         # 计算中性表情损失 - 使用与test_six_views相同的正面角度
         neutrality_loss = torch.tensor(0.0).to(images.device)
         if iteration % 10 == 0:  # 每10次迭代计算一次
-            # 使用与GenerateCircleCameras相同的正面参数
-            frontal_cam = sample_camera(
-                fov=opt.default_fovy,  # 使用默认视野
-                theta=opt.default_polar,  # 使用默认仰角
-                phi=0.0  # 正面方位角
-            )
+            # 使用新的sample_frontal_camera函数获取正面相机
+            frontal_cam = sample_frontal_camera()
             if frontal_cam is not None:
+                # 调试：打印相机参数以确认是正面视角
+                if iteration == 10:  # 只在第一次打印
+                    print(f"[DEBUG] Frontal camera verification:")
+                    print(f"  - delta_azimuth: {frontal_cam.delta_azimuth} (should be 0.0 for front view)")
+                    print(f"  - delta_polar: {frontal_cam.delta_polar} (should be 0.0 for default polar)")
+                    print(f"  - delta_radius: {frontal_cam.delta_radius} (should be 0.0 for default radius)")
+                    print(f"  - FovX: {frontal_cam.FovX}, FovY: {frontal_cam.FovY}")
+                
                 frontal_render = render(frontal_cam, gaussians, pipe, background, test=True)
                 frontal_image = frontal_render["render"].unsqueeze(0)
                 neutrality_loss = compute_neutrality_loss(frontal_image)
+                # 确保neutrality_loss在正确的设备上
+                neutrality_loss = neutrality_loss.to(images.device)
     
 
         if iteration % 100 == 0:
