@@ -455,31 +455,6 @@ def training(dataset, opt, pipe, gcams, guidance_opt, debug_from, save_video):
     process_view_points_copy = scene.getCircleVideoCameras(batch_size=opt.pro_frames_num,render45=opt.pro_render_45).copy()  
     frontal_viewpoint = process_view_points_copy.pop(0)
     
-    # 创建正面相机用于中性表情损失计算
-    from scene.dataset_readers import circle_poses
-    from utils.camera_utils import Camera
-    
-    thetas = torch.FloatTensor([gcams.default_polar])
-    phis = torch.FloatTensor([0.0])  # 正面角度
-    radius = torch.FloatTensor([gcams.default_radius])
-    poses = circle_poses(radius=radius, theta=thetas, phi=phis, 
-                       angle_overhead=gcams.angle_overhead, 
-                       angle_front=gcams.angle_front)
-    
-    # 构建相机矩阵
-    matrix = np.linalg.inv(poses[0])
-    R = -np.transpose(matrix[:3,:3])
-    R[:,0] = -R[:,0]
-    T = -matrix[:3, 3]
-    
-    # 创建正面相机
-    frontal_neutrality_cam = Camera(colmap_id=0, R=R, T=T, 
-                          FoVx=gcams.default_fovy, FoVy=gcams.default_fovy,
-                          image=None, gt_alpha_mask=None,
-                          image_name="frontal_neutrality", uid=0,
-                          trans=np.array([0.0, 0.0, 0.0]), scale=1.0,
-                          data_device=dataset.data_device)
-
     embeddings = prepare_embeddings(guidance_opt, guidance, id_emb, pipe, factor=0.9) 
 
     first_iter = 1
@@ -629,12 +604,19 @@ def training(dataset, opt, pipe, gcams, guidance_opt, debug_from, save_video):
 
         xyzloss = torch.nanmean((gaussians._xyz[gaussians.mask] - initt_txyz)**2)
         
-        # 计算中性表情损失 - 使用预创建的正面相机
+        # 计算中性表情损失 - 使用与test_six_views相同的正面角度
         neutrality_loss = torch.tensor(0.0).to(images.device)
-        if iteration % 1 == 0:  # 每10次迭代计算一次
-            frontal_render = render(frontal_neutrality_cam, gaussians, pipe, background, test=True)
-            frontal_image = frontal_render["render"].unsqueeze(0)
-            neutrality_loss = compute_neutrality_loss(frontal_image)
+        if iteration % 10 == 0:  # 每10次迭代计算一次
+            # 使用与GenerateCircleCameras相同的正面参数
+            frontal_cam = sample_camera(
+                fov=opt.default_fovy,  # 使用默认视野
+                theta=opt.default_polar,  # 使用默认仰角
+                phi=0.0  # 正面方位角
+            )
+            if frontal_cam is not None:
+                frontal_render = render(frontal_cam, gaussians, pipe, background, test=True)
+                frontal_image = frontal_render["render"].unsqueeze(0)
+                neutrality_loss = compute_neutrality_loss(frontal_image)
     
 
         if iteration % 100 == 0:
