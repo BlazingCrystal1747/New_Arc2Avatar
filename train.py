@@ -620,7 +620,7 @@ def training(dataset, opt, pipe, gcams, guidance_opt, debug_from, save_video):
         
         # 计算中性表情损失 - 使用与test_six_views相同的正面角度
         neutrality_loss = torch.tensor(0.0).to(images.device)
-        if iteration % 10 == 0:  # 每10次迭代计算一次
+        if iteration % 1 == 0:  # 每1次迭代计算一次
             # 使用新的sample_frontal_camera函数获取正面相机
             frontal_cam = sample_frontal_camera()
             if frontal_cam is not None:
@@ -634,17 +634,17 @@ def training(dataset, opt, pipe, gcams, guidance_opt, debug_from, save_video):
                 frontal_render = render(frontal_cam, gaussians, pipe, background, test=True)
                 frontal_image = frontal_render["render"].unsqueeze(0)
                 
-                # 保存正面照片用于验证（仅在第一次），参考test_six_views的保存方法
-                if iteration == 10:
-                    save_folder = os.path.join(scene.args._model_path, "frontal_verification")
-                    if not os.path.exists(save_folder):
-                        os.makedirs(save_folder)
-                        print('frontal verification folder created at:', save_folder)
+                # 保存正面照片用于验证（每100次迭代保存一次），参考test_six_views的保存方法
+                if iteration % 100 == 0:
+                    save_folder_front = os.path.join(scene.args._model_path, "frontal_verification")
+                    if not os.path.exists(save_folder_front):
+                        os.makedirs(save_folder_front)
+                        print('frontal verification folder created at:', save_folder_front)
                     
                     # 使用与test_six_views相同的方法保存图像
                     image = torch.clamp(frontal_render["render"], 0.0, 1.0)
-                    save_image(image, os.path.join(save_folder, "frontal_view_iter_{}.png".format(iteration)))
-                    print(f"[DEBUG] Frontal view saved to: {save_folder}/frontal_view_iter_{iteration}.png")
+                    save_image(image, os.path.join(save_folder_front, "frontal_view_iter_{}.png".format(iteration)))
+                    print(f"[DEBUG] Frontal view saved to: {save_folder_front}/frontal_view_iter_{iteration}.png")
                 
                 neutrality_loss = compute_neutrality_loss(frontal_image)
                 # 确保neutrality_loss在正确的设备上
