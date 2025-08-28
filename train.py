@@ -630,7 +630,6 @@ def training(dataset, opt, pipe, gcams, guidance_opt, debug_from, save_video):
                     print(f"  - delta_azimuth: {frontal_cam.delta_azimuth} (should be 0.0 for front view)")
                     print(f"  - delta_polar: {frontal_cam.delta_polar} (should be 0.0 for default polar)")
                     print(f"  - delta_radius: {frontal_cam.delta_radius} (should be 0.0 for default radius)")
-                    print(f"  - FovX: {frontal_cam.FovX}, FovY: {frontal_cam.FovY}")
                 
                 frontal_render = render(frontal_cam, gaussians, pipe, background, test=True)
                 frontal_image = frontal_render["render"].unsqueeze(0)
